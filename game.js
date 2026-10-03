@@ -74,6 +74,9 @@ const SLOW_DURATION      = 6;     // segundos
 const SLOW_DROP_CHANCE   = 0.08;  // probabilidad de soltar slow motion
 const SLOW_FACTOR        = 0.5;   // multiplicador de velocidad de los asteroides
 
+const NOVA_DROP_CHANCE   = 0.03;  // item escaso: un solo uso, se activa con B
+const NOVA_FX_TIME       = 0.6;   // segundos de la onda expansiva
+
 class Asteroid {
   constructor(x, y, size = 3) {
     this.x    = x;
@@ -279,6 +282,7 @@ const PICKUP_LOOK = {
   shield: { color: '#50dcff', label: 'S' },
   triple: { color: '#ffd23c', label: 'T' },
   slow:   { color: '#b47cff', label: 'L' },
+  nova:   { color: '#ff5a5a', label: 'N' },
 };
 
 class Pickup {
@@ -332,6 +336,8 @@ class Pickup {
 // ── Estado del juego ──────────────────────────────────────────────────────────
 let ship, bullets, asteroids, particles, pickups;
 let score, lives, level;
+let novaReady = false;   // bomba nova guardada (persiste entre vidas y niveles)
+let novaFx = null;       // { x, y, t } onda expansiva activa
 let state;      // 'playing' | 'dead' | 'gameover'
 let deadTimer;
 
@@ -353,6 +359,8 @@ function initGame() {
   asteroids = [];
   particles = [];
   pickups   = [];
+  novaReady = false;
+  novaFx    = null;
   score  = 0;
   lives  = 3;
   level  = 1;
@@ -371,6 +379,16 @@ function nextLevel() {
 
 function explode(x, y, count = 8) {
   for (let i = 0; i < count; i++) particles.push(new Particle(x, y));
+}
+
+function detonateNova() {
+  novaReady = false;
+  novaFx = { x: ship.x, y: ship.y, t: NOVA_FX_TIME };
+  for (const a of asteroids) {
+    score += POINTS[a.size];
+    explode(a.x, a.y, a.size * 5);
+  }
+  asteroids = [];
 }
 
 function killShip() {
@@ -409,6 +427,8 @@ function update(dt) {
   if (pressed('Space')) {
     bullets.push(...ship.tryShoot());
   }
+  if (pressed('KeyB') && novaReady) detonateNova();
+  if (novaFx && (novaFx.t -= dt) <= 0) novaFx = null;
 
   ship.update(dt);
   bullets.forEach(b => b.update(dt));
@@ -434,6 +454,7 @@ function update(dt) {
         if (roll < SHIELD_DROP_CHANCE) pickups.push(new Pickup(a.x, a.y, 'shield'));
         else if (roll < SHIELD_DROP_CHANCE + TRIPLE_DROP_CHANCE) pickups.push(new Pickup(a.x, a.y, 'triple'));
         else if (roll < SHIELD_DROP_CHANCE + TRIPLE_DROP_CHANCE + SLOW_DROP_CHANCE) pickups.push(new Pickup(a.x, a.y, 'slow'));
+        else if (roll < SHIELD_DROP_CHANCE + TRIPLE_DROP_CHANCE + SLOW_DROP_CHANCE + NOVA_DROP_CHANCE) pickups.push(new Pickup(a.x, a.y, 'nova'));
       }
     }
   }
@@ -446,6 +467,7 @@ function update(dt) {
       p.dead = true;
       if (p.type === 'triple') ship.tripleTimer = TRIPLE_DURATION;
       else if (p.type === 'slow') ship.slowTimer = SLOW_DURATION;
+      else if (p.type === 'nova') novaReady = true;
       else ship.shieldTimer = SHIELD_DURATION;
     }
   }
@@ -511,6 +533,11 @@ function drawHUD() {
     ['TRIPLE', ship.tripleTimer, PICKUP_LOOK.triple.color],
     ['SLOW',   ship.slowTimer,   PICKUP_LOOK.slow.color],
   ].filter(([, t]) => t > 0);
+  if (novaReady) {
+    ctx.fillStyle = PICKUP_LOOK.nova.color;
+    ctx.textAlign = 'right';
+    ctx.fillText('NOVA LISTA [B]', W - 14, H - 14);
+  }
   ctx.textAlign = 'left';
   active.forEach(([name, t, color], i) => {
     ctx.fillStyle = color;
@@ -537,6 +564,19 @@ function draw() {
   bullets.forEach(b => b.draw());
   pickups.forEach(p => p.draw());
   ship.draw();
+
+  if (novaFx) {
+    const k = 1 - novaFx.t / NOVA_FX_TIME;
+    ctx.save();
+    ctx.strokeStyle = `rgba(255, 90, 90, ${(1 - k).toFixed(2)})`;
+    ctx.lineWidth   = 4;
+    ctx.shadowColor = '#ff5a5a';
+    ctx.shadowBlur  = 15;
+    ctx.beginPath();
+    ctx.arc(novaFx.x, novaFx.y, k * Math.hypot(W, H), 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
 
   drawHUD();
 
