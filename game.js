@@ -63,19 +63,27 @@ const SPEEDS = [0, 85, 55, 32];   // velocidad base por tamaño
 const POINTS = [0, 100, 50, 20];  // puntos por tamaño
 
 const SHIELD_DURATION    = 5;     // segundos
-const SHIELD_DROP_CHANCE = 0.15;  // probabilidad de soltar escudo al destruir asteroide
 const PICKUP_TTL         = 10;    // segundos que el power-up flota antes de desaparecer
 
 const TRIPLE_DURATION    = 10;    // segundos
-const TRIPLE_DROP_CHANCE = 0.10;  // probabilidad de soltar disparo triple
 const TRIPLE_SPREAD      = 0.26;  // rad entre balas del abanico (~15°)
 
 const SLOW_DURATION      = 6;     // segundos
-const SLOW_DROP_CHANCE   = 0.08;  // probabilidad de soltar slow motion
 const SLOW_FACTOR        = 0.5;   // multiplicador de velocidad de los asteroides
 
-const NOVA_DROP_CHANCE   = 0.03;  // item escaso: un solo uso, se activa con B
-const NOVA_FX_TIME       = 0.6;   // segundos de la onda expansiva
+const NOVA_FX_TIME       = 0.6;   // segundos de la onda expansiva (un solo uso, tecla B)
+
+const BOOST_DURATION     = 8;     // segundos
+const BOOST_THRUST_MULT  = 2.2;   // multiplica aceleración y, por ende, velocidad máxima
+
+// Probabilidad de soltar cada power-up al destruir un asteroide (total ≈ 14%)
+const DROP_CHANCES = [
+  ['shield', 0.04],
+  ['triple', 0.03],
+  ['slow',   0.03],
+  ['boost',  0.03],
+  ['nova',   0.01],   // escaso
+];
 
 class Asteroid {
   constructor(x, y, size = 3) {
@@ -150,7 +158,8 @@ class Ship {
     this.shieldTimer   = 0;
     this.tripleTimer   = 0;
     this.slowTimer     = 0;
-    this.dead         = false;
+    this.boostTimer    = 0;
+    this.dead        = false;
   }
 
   update(dt) {
@@ -160,9 +169,10 @@ class Ship {
     if (this.shieldTimer   > 0) this.shieldTimer   -= dt;
     if (this.tripleTimer   > 0) this.tripleTimer   -= dt;
     if (this.slowTimer     > 0) this.slowTimer     -= dt;
+    if (this.boostTimer    > 0) this.boostTimer    -= dt;
 
     const ROT   = 3.5;   // rad/s
-    const THRUST = 260;  // px/s²
+    const THRUST = 260 * (this.boostTimer > 0 ? BOOST_THRUST_MULT : 1);  // px/s²
     const DRAG   = 0.987;
 
     if (keys['ArrowLeft'])  this.angle -= ROT * dt;
@@ -283,6 +293,7 @@ const PICKUP_LOOK = {
   triple: { color: '#ffd23c', label: 'T' },
   slow:   { color: '#b47cff', label: 'L' },
   nova:   { color: '#ff5a5a', label: 'N' },
+  boost:  { color: '#6dff7a', label: 'H' },
 };
 
 class Pickup {
@@ -381,6 +392,16 @@ function explode(x, y, count = 8) {
   for (let i = 0; i < count; i++) particles.push(new Particle(x, y));
 }
 
+// Una sola tirada: devuelve el tipo de power-up a soltar, o null
+function rollDrop() {
+  let roll = Math.random();
+  for (const [type, chance] of DROP_CHANCES) {
+    if (roll < chance) return type;
+    roll -= chance;
+  }
+  return null;
+}
+
 function detonateNova() {
   novaReady = false;
   novaFx = { x: ship.x, y: ship.y, t: NOVA_FX_TIME };
@@ -450,11 +471,8 @@ function update(dt) {
         score += POINTS[a.size];
         explode(a.x, a.y, a.size * 5);
         newAsteroids.push(...a.split());
-        const roll = Math.random();
-        if (roll < SHIELD_DROP_CHANCE) pickups.push(new Pickup(a.x, a.y, 'shield'));
-        else if (roll < SHIELD_DROP_CHANCE + TRIPLE_DROP_CHANCE) pickups.push(new Pickup(a.x, a.y, 'triple'));
-        else if (roll < SHIELD_DROP_CHANCE + TRIPLE_DROP_CHANCE + SLOW_DROP_CHANCE) pickups.push(new Pickup(a.x, a.y, 'slow'));
-        else if (roll < SHIELD_DROP_CHANCE + TRIPLE_DROP_CHANCE + SLOW_DROP_CHANCE + NOVA_DROP_CHANCE) pickups.push(new Pickup(a.x, a.y, 'nova'));
+        const type = rollDrop();
+        if (type) pickups.push(new Pickup(a.x, a.y, type));
       }
     }
   }
@@ -468,6 +486,7 @@ function update(dt) {
       if (p.type === 'triple') ship.tripleTimer = TRIPLE_DURATION;
       else if (p.type === 'slow') ship.slowTimer = SLOW_DURATION;
       else if (p.type === 'nova') novaReady = true;
+      else if (p.type === 'boost') ship.boostTimer = BOOST_DURATION;
       else ship.shieldTimer = SHIELD_DURATION;
     }
   }
@@ -532,6 +551,7 @@ function drawHUD() {
     ['ESCUDO', ship.shieldTimer, PICKUP_LOOK.shield.color],
     ['TRIPLE', ship.tripleTimer, PICKUP_LOOK.triple.color],
     ['SLOW',   ship.slowTimer,   PICKUP_LOOK.slow.color],
+    ['HIPER',  ship.boostTimer,  PICKUP_LOOK.boost.color],
   ].filter(([, t]) => t > 0);
   if (novaReady) {
     ctx.fillStyle = PICKUP_LOOK.nova.color;
