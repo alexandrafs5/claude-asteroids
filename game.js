@@ -70,6 +70,10 @@ const TRIPLE_DURATION    = 10;    // segundos
 const TRIPLE_DROP_CHANCE = 0.10;  // probabilidad de soltar disparo triple
 const TRIPLE_SPREAD      = 0.26;  // rad entre balas del abanico (~15°)
 
+const SLOW_DURATION      = 6;     // segundos
+const SLOW_DROP_CHANCE   = 0.08;  // probabilidad de soltar slow motion
+const SLOW_FACTOR        = 0.5;   // multiplicador de velocidad de los asteroides
+
 class Asteroid {
   constructor(x, y, size = 3) {
     this.x    = x;
@@ -142,7 +146,8 @@ class Ship {
     this.shootCooldown = 0;
     this.shieldTimer   = 0;
     this.tripleTimer   = 0;
-    this.dead          = false;
+    this.slowTimer     = 0;
+    this.dead         = false;
   }
 
   update(dt) {
@@ -151,6 +156,7 @@ class Ship {
     if (this.shootCooldown > 0) this.shootCooldown -= dt;
     if (this.shieldTimer   > 0) this.shieldTimer   -= dt;
     if (this.tripleTimer   > 0) this.tripleTimer   -= dt;
+    if (this.slowTimer     > 0) this.slowTimer     -= dt;
 
     const ROT   = 3.5;   // rad/s
     const THRUST = 260;  // px/s²
@@ -269,13 +275,20 @@ class Particle {
 }
 
 // ── Power-ups: escudo / disparo triple ────────────────────────────────────────
+const PICKUP_LOOK = {
+  shield: { color: '#50dcff', label: 'S' },
+  triple: { color: '#ffd23c', label: 'T' },
+  slow:   { color: '#b47cff', label: 'L' },
+};
+
 class Pickup {
   constructor(x, y, type = 'shield') {
     this.x = x;
     this.y = y;
     this.type  = type;
-    this.color = type === 'triple' ? '#ffd23c' : '#50dcff';
-    this.label = type === 'triple' ? 'T' : 'S';
+    const look = PICKUP_LOOK[type];
+    this.color = look.color;
+    this.label = look.label;
     const angle = rand(0, Math.PI * 2);
     const speed = rand(10, 25);
     this.vx     = Math.cos(angle) * speed;
@@ -399,11 +412,12 @@ function update(dt) {
 
   ship.update(dt);
   bullets.forEach(b => b.update(dt));
-  asteroids.forEach(a => a.update(dt));
+  const astDt = ship.slowTimer > 0 ? dt * SLOW_FACTOR : dt;
+  asteroids.forEach(a => a.update(astDt));
   particles.forEach(p => p.update(dt));
   pickups.forEach(p => p.update(dt));
 
-  bullets   = bullets.filter(b => !b.dead);
+  bullets  = bullets.filter(b => !b.dead);
   particles = particles.filter(p => !p.dead);
 
   // Bala vs asteroide
@@ -419,6 +433,7 @@ function update(dt) {
         const roll = Math.random();
         if (roll < SHIELD_DROP_CHANCE) pickups.push(new Pickup(a.x, a.y, 'shield'));
         else if (roll < SHIELD_DROP_CHANCE + TRIPLE_DROP_CHANCE) pickups.push(new Pickup(a.x, a.y, 'triple'));
+        else if (roll < SHIELD_DROP_CHANCE + TRIPLE_DROP_CHANCE + SLOW_DROP_CHANCE) pickups.push(new Pickup(a.x, a.y, 'slow'));
       }
     }
   }
@@ -430,6 +445,7 @@ function update(dt) {
     if (!p.dead && dist(ship, p) < ship.radius + p.radius) {
       p.dead = true;
       if (p.type === 'triple') ship.tripleTimer = TRIPLE_DURATION;
+      else if (p.type === 'slow') ship.slowTimer = SLOW_DURATION;
       else ship.shieldTimer = SHIELD_DURATION;
     }
   }
@@ -490,17 +506,16 @@ function drawHUD() {
   for (let i = 0; i < lives; i++)
     drawLifeIcon(W - 16 - i * 22, 18);
 
-  if (ship.shieldTimer > 0) {
-    ctx.fillStyle = '#50dcff';
-    ctx.textAlign = 'left';
-    ctx.fillText(`ESCUDO ${ship.shieldTimer.toFixed(1)}s`, 14, H - 14);
-  }
-  if (ship.tripleTimer > 0) {
-    ctx.fillStyle = '#ffd23c';
-    ctx.textAlign = 'left';
-    const y = ship.shieldTimer > 0 ? H - 34 : H - 14;
-    ctx.fillText(`TRIPLE ${ship.tripleTimer.toFixed(1)}s`, 14, y);
-  }
+  const active = [
+    ['ESCUDO', ship.shieldTimer, PICKUP_LOOK.shield.color],
+    ['TRIPLE', ship.tripleTimer, PICKUP_LOOK.triple.color],
+    ['SLOW',   ship.slowTimer,   PICKUP_LOOK.slow.color],
+  ].filter(([, t]) => t > 0);
+  ctx.textAlign = 'left';
+  active.forEach(([name, t, color], i) => {
+    ctx.fillStyle = color;
+    ctx.fillText(`${name} ${t.toFixed(1)}s`, 14, H - 14 - i * 20);
+  });
 }
 
 function drawOverlay(title, sub) {
