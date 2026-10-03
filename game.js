@@ -64,7 +64,11 @@ const POINTS = [0, 100, 50, 20];  // puntos por tamaño
 
 const SHIELD_DURATION    = 5;     // segundos
 const SHIELD_DROP_CHANCE = 0.15;  // probabilidad de soltar escudo al destruir asteroide
-const PICKUP_TTL         = 10;    // segundos que el escudo flota antes de desaparecer
+const PICKUP_TTL         = 10;    // segundos que el power-up flota antes de desaparecer
+
+const TRIPLE_DURATION    = 10;    // segundos
+const TRIPLE_DROP_CHANCE = 0.10;  // probabilidad de soltar disparo triple
+const TRIPLE_SPREAD      = 0.26;  // rad entre balas del abanico (~15°)
 
 class Asteroid {
   constructor(x, y, size = 3) {
@@ -137,6 +141,7 @@ class Ship {
     this.invincible    = 3;
     this.shootCooldown = 0;
     this.shieldTimer   = 0;
+    this.tripleTimer   = 0;
     this.dead          = false;
   }
 
@@ -145,6 +150,7 @@ class Ship {
     if (this.invincible    > 0) this.invincible    -= dt;
     if (this.shootCooldown > 0) this.shootCooldown -= dt;
     if (this.shieldTimer   > 0) this.shieldTimer   -= dt;
+    if (this.tripleTimer   > 0) this.tripleTimer   -= dt;
 
     const ROT   = 3.5;   // rad/s
     const THRUST = 260;  // px/s²
@@ -171,6 +177,9 @@ class Ship {
     const NOSE = 21;
     const ox = this.x + Math.cos(this.angle) * NOSE;
     const oy = this.y + Math.sin(this.angle) * NOSE;
+    if (this.tripleTimer > 0) {
+      return [-TRIPLE_SPREAD, 0, TRIPLE_SPREAD].map(d => new Bullet(ox, oy, this.angle + d));
+    }
     return [new Bullet(ox, oy, this.angle)];
   }
 
@@ -259,11 +268,14 @@ class Particle {
   }
 }
 
-// ── Power-up: escudo ──────────────────────────────────────────────────────────
-class ShieldPickup {
-  constructor(x, y) {
+// ── Power-ups: escudo / disparo triple ────────────────────────────────────────
+class Pickup {
+  constructor(x, y, type = 'shield') {
     this.x = x;
     this.y = y;
+    this.type  = type;
+    this.color = type === 'triple' ? '#ffd23c' : '#50dcff';
+    this.label = type === 'triple' ? 'T' : 'S';
     const angle = rand(0, Math.PI * 2);
     const speed = rand(10, 25);
     this.vx     = Math.cos(angle) * speed;
@@ -284,8 +296,8 @@ class ShieldPickup {
     if (this.ttl < 3 && Math.floor(this.ttl * 6) % 2 === 0) return;
     ctx.save();
     ctx.translate(this.x, this.y);
-    ctx.strokeStyle = '#50dcff';
-    ctx.fillStyle   = '#50dcff';
+    ctx.strokeStyle = this.color;
+    ctx.fillStyle   = this.color;
     ctx.lineWidth   = 1.5;
     ctx.beginPath();
     for (let i = 0; i < 6; i++) {
@@ -299,7 +311,7 @@ class ShieldPickup {
     ctx.font = 'bold 12px monospace';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText('S', 0, 1);
+    ctx.fillText(this.label, 0, 1);
     ctx.restore();
   }
 }
@@ -404,18 +416,21 @@ function update(dt) {
         score += POINTS[a.size];
         explode(a.x, a.y, a.size * 5);
         newAsteroids.push(...a.split());
-        if (Math.random() < SHIELD_DROP_CHANCE) pickups.push(new ShieldPickup(a.x, a.y));
+        const roll = Math.random();
+        if (roll < SHIELD_DROP_CHANCE) pickups.push(new Pickup(a.x, a.y, 'shield'));
+        else if (roll < SHIELD_DROP_CHANCE + TRIPLE_DROP_CHANCE) pickups.push(new Pickup(a.x, a.y, 'triple'));
       }
     }
   }
   asteroids = asteroids.filter(a => !a.dead).concat(newAsteroids);
   bullets   = bullets.filter(b => !b.dead);
 
-  // Nave vs escudo (recoger)
+  // Nave vs power-up (recoger)
   for (const p of pickups) {
     if (!p.dead && dist(ship, p) < ship.radius + p.radius) {
       p.dead = true;
-      ship.shieldTimer = SHIELD_DURATION;
+      if (p.type === 'triple') ship.tripleTimer = TRIPLE_DURATION;
+      else ship.shieldTimer = SHIELD_DURATION;
     }
   }
   pickups = pickups.filter(p => !p.dead);
@@ -479,6 +494,12 @@ function drawHUD() {
     ctx.fillStyle = '#50dcff';
     ctx.textAlign = 'left';
     ctx.fillText(`ESCUDO ${ship.shieldTimer.toFixed(1)}s`, 14, H - 14);
+  }
+  if (ship.tripleTimer > 0) {
+    ctx.fillStyle = '#ffd23c';
+    ctx.textAlign = 'left';
+    const y = ship.shieldTimer > 0 ? H - 34 : H - 14;
+    ctx.fillText(`TRIPLE ${ship.tripleTimer.toFixed(1)}s`, 14, y);
   }
 }
 
